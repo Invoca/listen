@@ -111,6 +111,8 @@ module Listen
       # TODO: allow backend adapters to pass specific invalidation objects
       # e.g. Darwin -> DirRescan, INotify -> MoveScan, etc.
       def _queue_change(type, dir, rel_path, options)
+        _log(:debug, "InvocaDebug: _queue_change(#{type.inspect}, #{dir.inspect}, #{rel_path.inspect}, #{options.inspect})")
+
         @snapshots[dir].invalidate(type, rel_path, options)
       end
 

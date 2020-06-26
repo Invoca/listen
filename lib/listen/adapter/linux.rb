@@ -38,6 +38,9 @@ module Listen
         Thread.current[:listen_blocking_read_thread] = true
         @worker.run
         Thread.current[:listen_blocking_read_thread] = false
+      rescue => ex
+        _log(:debug, "InvocaDebug: BUG in _run: rescued exception #{ex.class.name}: #{ex.message}")
+        Thread.current[:listen_blocking_read_thread] = false
       end
 
       def _process_event(dir, event)
@@ -50,6 +53,7 @@ module Listen
         _log(:debug) { "inotify: #{rel_path} (#{event.flags.inspect})" }
 
         if /1|true/ =~ ENV['LISTEN_GEM_SIMULATE_FSEVENT']
+          _log(:debug, "InvocaDebug: LISTEN_GEM_SIMULATE_FSEVENT short circuit")
           if (event.flags & [:moved_to, :moved_from]) || _dir_event?(event)
             rel_path = path.dirname.relative_path_from(dir).to_s
           end
@@ -57,13 +61,17 @@ module Listen
           return
         end
 
-        return if _skip_event?(event)
+        if _skip_event?(event)
+          _log(:debug, "InvocaDebug: skip_event? short circuit: #{event.inspect}")
+          return
+        end
 
         cookie_params = event.cookie.zero? ? {} : { cookie: event.cookie }
 
         # Note: don't pass options to force rescanning the directory, so we can
         # detect moving/deleting a whole tree
         if _dir_event?(event)
+          _log(:debug, "InvocaDebug: dir_event? short circuit: #{event.inspect}")
           _queue_change(:dir, dir, rel_path, cookie_params)
           return
         end
