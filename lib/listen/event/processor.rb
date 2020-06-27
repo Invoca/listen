@@ -1,3 +1,5 @@
+require 'listen/logger'
+
 module Listen
   module Event
     class Processor
@@ -13,9 +15,13 @@ module Listen
         @latency = latency
 
         loop do
+          Listen::Logger.debug("InvocaDebug: about to _wait_until_events")
           _wait_until_events
+          Listen::Logger.debug("InvocaDebug: about to _wait_until_events_calm_down")
           _wait_until_events_calm_down
+          Listen::Logger.debug("InvocaDebug: about to _wait_until_no_longer_paused")
           _wait_until_no_longer_paused
+          Listen::Logger.debug("InvocaDebug: about to _process_changes")
           _process_changes
         end
       rescue Stopped
