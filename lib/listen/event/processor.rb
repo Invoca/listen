@@ -110,12 +110,16 @@ module Listen
         changes = []
         changes << config.event_queue.pop until config.event_queue.empty?
 
+        Listen::Logger.debug("InvocaDebug: _process_changes popped #{changes.size}")
+
         callable = config.callable?
         return unless callable
 
         hash = config.optimize_changes(changes)
         result = [hash[:modified], hash[:added], hash[:removed]]
-        return if result.all?(&:empty?)
+        if result.all?(&:empty?)
+          Listen::Logger.debug("InvocaDebug: _process_changes returning because #{changes.inspect} optimized to empty")
+        end
 
         block_start = _timestamp
         config.call(*result)

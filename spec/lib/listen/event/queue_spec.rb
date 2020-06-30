@@ -2,7 +2,7 @@ require 'listen/event/queue'
 
 # TODO: not part of listener really
 RSpec.describe Listen::Event::Queue do
-  let(:queue) { instance_double(Thread::Queue, 'my queue') }
+  let(:queue) { instance_double(Thread::Queue, 'my queue', size: 1) }
 
   let(:config) { instance_double(Listen::Event::Queue::Config) }
 
