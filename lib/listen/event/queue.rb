@@ -1,3 +1,5 @@
+require 'listen/logger'
+
 require 'thread'
 
 require 'forwardable'
@@ -30,6 +32,9 @@ module Listen
         fail "Invalid path: #{path.inspect}" unless path.is_a?(String)
 
         dir = _safe_relative_from_cwd(dir)
+
+        Listen::Logger.debug("InvocaDebug: queuing #{[type, change, dir, path, options]} to queue with depth #{event_queue.size}")
+
         event_queue.public_send(:<<, [type, change, dir, path, options])
 
         block.call(args) if block

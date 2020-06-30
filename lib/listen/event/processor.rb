@@ -1,3 +1,5 @@
+require 'listen/logger'
+
 module Listen
   module Event
     class Processor
@@ -13,9 +15,13 @@ module Listen
         @latency = latency
 
         loop do
+          Listen::Logger.debug("InvocaDebug: about to _wait_until_events")
           _wait_until_events
+          Listen::Logger.debug("InvocaDebug: about to _wait_until_events_calm_down")
           _wait_until_events_calm_down
+          Listen::Logger.debug("InvocaDebug: about to _wait_until_no_longer_paused")
           _wait_until_no_longer_paused
+          Listen::Logger.debug("InvocaDebug: about to _process_changes")
           _process_changes
         end
       rescue Stopped
@@ -104,12 +110,16 @@ module Listen
         changes = []
         changes << config.event_queue.pop until config.event_queue.empty?
 
+        Listen::Logger.debug("InvocaDebug: _process_changes popped #{changes.size}")
+
         callable = config.callable?
         return unless callable
 
         hash = config.optimize_changes(changes)
         result = [hash[:modified], hash[:added], hash[:removed]]
-        return if result.all?(&:empty?)
+        if result.all?(&:empty?)
+          Listen::Logger.debug("InvocaDebug: _process_changes returning because #{changes.inspect} optimized to empty")
+        end
 
         block_start = _timestamp
         config.call(*result)
