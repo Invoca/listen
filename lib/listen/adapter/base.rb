@@ -69,19 +69,11 @@ module Listen
 
         @started = true
 
-        calling_stack = caller.dup
         Listen::Internals::ThreadPool.add do
-          begin
-            @snapshots.values.each do |snapshot|
-              _timed('Record.build()') { snapshot.record.build }
-            end
-            _run
-          rescue
-            msg = 'run() in thread failed: %s:\n'\
-              ' %s\n\ncalled from:\n %s'
-            _log_exception(msg, calling_stack)
-            raise # for unit tests mostly
+          @snapshots.values.each do |snapshot|
+            _timed('Record.build()') { snapshot.record.build }
           end
+          _run
         end
       end
 

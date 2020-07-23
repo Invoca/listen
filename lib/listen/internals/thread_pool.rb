@@ -1,11 +1,22 @@
+require 'listen/logger'
+
 module Listen
   # @private api
   module Internals
     module ThreadPool
       def self.add(&block)
-        Thread.new { block.call }.tap do |th|
-          (@threads ||= Queue.new) << th
-        end
+        calling_stack = caller.dup
+        Thread.new do
+          begin
+            Listen::Logger.debug("InvocaDebug: thread starting")
+            block.call
+            Listen::Logger.debug("InvocaDebug: thread stopping cleanly")
+          rescue Exception => ex # we want to rescue ALL exceptions since we are at the top of a thread
+            Listen::Logger.fatal("Listen gem thread exception: #{ex.class.name}: #{ex.message}\n#{ex.backtrace.join("\n")}\n" +
+                                 "ThreadPool.add called from:\n#{calling_stack.join("\n")}"
+            )
+          end
+        end.tap { |thread| (@threads ||= Queue.new) << thread }
       end
 
       def self.stop
