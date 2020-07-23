@@ -11,9 +11,15 @@ module Listen
     extend Forwardable
 
     def initialize(directories, queue, silencer, config)
+      Listen::Logger.debug("InvocaDebug: Backend#initialize about to call adapter_select_options")
+
       adapter_select_opts = config.adapter_select_options
 
+      Listen::Logger.debug("InvocaDebug: Backend#initialize about to call Adapter.select")
+
       adapter_class = Adapter.select(adapter_select_opts)
+
+      Listen::Logger.debug("InvocaDebug: Backend#initialize chose Adapter #{adapter_class.name}")
 
       # Use default from adapter if possible
       @min_delay_between_events = config.min_delay_between_events
@@ -22,8 +28,15 @@ module Listen
 
       adapter_opts = config.adapter_instance_options(adapter_class)
 
+      Listen::Logger.debug("InvocaDebug: Backend#initialize about to call Adapter::Config.new")
+
       aconfig = Adapter::Config.new(directories, queue, silencer, adapter_opts)
+
+      Listen::Logger.debug("InvocaDebug: Backend#initialize about to call #{adapter_class}.new")
+
       @adapter = adapter_class.new(aconfig)
+
+      Listen::Logger.debug("InvocaDebug: Backend#initialize done")
     end
 
     delegate start: :adapter

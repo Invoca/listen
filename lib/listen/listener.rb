@@ -35,18 +35,36 @@ module Listen
     def initialize(*dirs, &block)
       options = dirs.last.is_a?(Hash) ? dirs.pop : {}
 
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Config.new")
+
       @config = Config.new(options)
 
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Queue::Config.new")
+
       eq_config = Event::Queue::Config.new(@config.relative?)
+
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Queue.new")
+
       queue = Event::Queue.new(eq_config) { @processor.wakeup_on_event }
+
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Silencer.new")
 
       silencer = Silencer.new
       rules = @config.silencer_rules
+
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Silencer::Controller.new")
+
       @silencer_controller = Silencer::Controller.new(silencer, rules)
+
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Backend.new")
 
       @backend = Backend.new(dirs, queue, silencer, @config)
 
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call QueueOptimizer::Config.new")
+
       optimizer_config = QueueOptimizer::Config.new(@backend, silencer)
+
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Config.new")
 
       pconfig = Event::Config.new(
         self,
@@ -55,7 +73,11 @@ module Listen
         @backend.min_delay_between_events,
         &block)
 
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Loop.new")
+
       @processor = Event::Loop.new(pconfig)
+
+      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call super")
 
       super() # FSM
     end
@@ -88,9 +110,13 @@ module Listen
     # Starts processing events and starts adapters
     # or resumes invoking callbacks if paused
     def start
+      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :backend_started state: #{state}")
       transition :backend_started if state == :initializing
+      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :frontend_ready state: #{state}")
       transition :frontend_ready if state == :backend_started
+      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :processing_events state: #{state}")
       transition :processing_events if state == :frontend_ready
+      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :processing_events state: #{state}")
       transition :processing_events if state == :paused
     end
 
