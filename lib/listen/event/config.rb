@@ -1,6 +1,8 @@
 module Listen
   module Event
     class Config
+      attr_reader :listener
+
       def initialize(
         listener,
         event_queue,
@@ -38,18 +40,6 @@ module Listen
       end
 
       attr_reader :min_delay_between_events
-
-      def stopped?
-        listener.state == :stopped
-      end
-
-      def paused?
-        listener.state == :paused
-      end
-
-      private
-
-      attr_reader :listener
     end
   end
 end

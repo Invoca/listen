@@ -62,7 +62,7 @@ module Listen
     end
 
     def configure(options)
-      @only_patterns = options[:only] ? Array(options[:only]) : nil
+      @only_patterns = Array(options[:only]) if options[:only]
       @ignore_patterns = _init_ignores(options[:ignore], options[:ignore!])
     end
 
@@ -73,16 +73,18 @@ module Listen
     def silenced?(relative_path, type)
       path = relative_path.to_s
 
-      if only_patterns && type == :file
-        return true unless only_patterns.any? { |pattern| path =~ pattern }
-      end
-
-      ignore_patterns.any? { |pattern| path =~ pattern }
+      silenced_only_patterns(path) || silenced_ignore_patterns(path)
     end
 
     private
 
-    attr_reader :options
+    def silenced_only_patterns(path)
+      type == :file && only_patterns && !only_patterns.any? { |pattern| path =~ pattern }
+    end
+
+    def silenced_ignore_patterns(path)
+      ignore_patterns.any? { |pattern| path =~ pattern }
+    end
 
     def _init_ignores(ignores, overrides)
       patterns = []

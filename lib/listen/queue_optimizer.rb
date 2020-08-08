@@ -13,10 +13,6 @@ module Listen
       def silenced?(path, type)
         @silencer.silenced?(path, type)
       end
-
-      def debug(*args, &block)
-        Listen.logger.debug(*args, &block)
-      end
     end
 
     def smoosh_changes(changes)
@@ -46,13 +42,13 @@ module Listen
         [_logical_action_for(path, action_list.map(&:first)), path.to_s]
       end
 
-      config.debug("listen: raw changes: #{actions.inspect}")
+      Listen.logger.debug("listen: raw changes: #{actions.inspect}")
 
       { modified: [], added: [], removed: [] }.tap do |squashed|
         actions.each do |type, path|
           squashed[type] << path unless type.nil?
         end
-        config.debug("listen: final changes: #{squashed.inspect}")
+        Listen.logger.debug("listen: final changes: #{squashed.inspect}")
       end
     end
 
@@ -121,12 +117,15 @@ module Listen
         end
       end
 
-      return unless from && to
-
-      # Expect an ignored moved_from and non-ignored moved_to
-      # to qualify as an "editor modify"
-      return unless config.silenced?(Pathname(from), from_type)
-      config.silenced?(Pathname(to), to_type) ? nil : [to_dir, to]
+      if from && to
+        # Expect an ignored moved_from and non-ignored moved_to
+        # to qualify as an "editor modify"
+        if config.silenced?(Pathname(from), from_type)
+          if !config.silenced?(Pathname(to), to_type)
+            [to_dir, to]
+          end
+        end
+      end
     end
   end
 end

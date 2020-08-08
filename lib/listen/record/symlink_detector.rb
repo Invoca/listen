@@ -16,8 +16,7 @@ module Listen
         MORE INFO: #{WIKI}
       EOS
 
-      class Error < RuntimeError
-      end
+      class Error < RuntimeError; end
 
       def initialize
         @real_dirs = Set.new
@@ -25,14 +24,14 @@ module Listen
 
       def verify_unwatched!(entry)
         real_path = entry.real_path
-        @real_dirs.add?(real_path) || _fail(entry.sys_path, real_path)
+        @real_dirs.add?(real_path) or _fail(entry.sys_path, real_path)
       end
 
       private
 
       def _fail(symlinked, real_path)
-        STDERR.puts format(SYMLINK_LOOP_ERROR, symlinked, real_path)
-        fail Error, 'Failed due to looped symlinks'
+        warn format(SYMLINK_LOOP_ERROR, symlinked, real_path)
+        raise Error, 'Failed due to looped symlinks'
       end
     end
   end

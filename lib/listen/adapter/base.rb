@@ -16,9 +16,9 @@ module Listen
         @started = false
         @config = config
 
-        @configured = nil
+        @configured = false
 
-        fail 'No directories to watch!' if config.directories.empty?
+        config.directories.empty? and raise 'No directories to watch!'
 
         defaults = self.class.const_get('DEFAULTS')
         @options = Listen::Options.new(config.adapter_options, defaults)
@@ -29,13 +29,6 @@ module Listen
 
       # TODO: it's a separate method as a temporary workaround for tests
       def configure
-        if @configured
-          _log(:warn, 'Adapter already configured!')
-          return
-        end
-
-        @configured = true
-
         @callbacks ||= {}
         config.directories.each do |dir|
           callback = @callbacks[dir] || lambda do |event|
@@ -55,14 +48,17 @@ module Listen
         end
       end
 
-      def started?
-        @started
-      end
-
       def start
+        if @configured
+          _log(:warn, 'Adapter already configured!')
+          return
+        end
+
+        @configured = true
+
         configure
 
-        if started?
+        if @started
           _log(:warn, 'Adapter already started!')
           return
         end
@@ -73,6 +69,7 @@ module Listen
           @snapshots.values.each do |snapshot|
             _timed('Record.build()') { snapshot.record.build }
           end
+
           _run
         end
       end
@@ -81,8 +78,10 @@ module Listen
         _stop
       end
 
-      def self.usable?
-        const_get('OS_REGEXP') =~ RbConfig::CONFIG['target_os']
+      class << self
+        def usable?
+          const_get('OS_REGEXP') =~ RbConfig::CONFIG['target_os']
+        end
       end
 
       private
@@ -109,7 +108,7 @@ module Listen
       end
 
       def _log(*args, &block)
-        self.class.send(:_log, *args, &block)
+        self.class._log(*args, &block)
       end
 
       def _log_exception(msg, caller_stack)

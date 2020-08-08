@@ -22,9 +22,9 @@ module Listen
       Listen::Logger.debug("InvocaDebug: Backend#initialize chose Adapter #{adapter_class.name}")
 
       # Use default from adapter if possible
-      @min_delay_between_events = config.min_delay_between_events
-      @min_delay_between_events ||= adapter_class::DEFAULTS[:wait_for_delay]
-      @min_delay_between_events ||= 0.1
+      @min_delay_between_events = config.min_delay_between_events ||
+                                  adapter_class::DEFAULTS[:wait_for_delay] ||
+                                  0.1
 
       adapter_opts = config.adapter_instance_options(adapter_class)
 
@@ -35,17 +35,13 @@ module Listen
       Listen::Logger.debug("InvocaDebug: Backend#initialize about to call #{adapter_class}.new")
 
       @adapter = adapter_class.new(aconfig)
+      @adapter.start
 
       Listen::Logger.debug("InvocaDebug: Backend#initialize done")
     end
 
-    delegate start: :adapter
-    delegate stop: :adapter
+    delegate stop: :@adapter
 
     attr_reader :min_delay_between_events
-
-    private
-
-    attr_reader :adapter
   end
 end

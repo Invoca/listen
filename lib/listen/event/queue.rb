@@ -9,20 +9,10 @@ module Listen
     class Queue
       extend Forwardable
 
-      class Config
-        def initialize(relative)
-          @relative = relative
-        end
-
-        def relative?
-          @relative
-        end
-      end
-
-      def initialize(config, &block)
-        @event_queue = ::Queue.new
+      def initialize(relative, &block)
+        @relative = relative
         @block = block
-        @config = config
+        @event_queue = ::Queue.new
       end
 
       def <<(args)
@@ -31,29 +21,30 @@ module Listen
         fail "Invalid change: #{change.inspect}" unless change.is_a?(Symbol)
         fail "Invalid path: #{path.inspect}" unless path.is_a?(String)
 
-        dir = _safe_relative_from_cwd(dir)
+        safe_dir = _safe_relative_from_cwd(dir, @relative)
 
-        Listen::Logger.debug("InvocaDebug: queuing #{[type, change, dir, path, options]} to queue with depth #{event_queue.size}")
+        Listen::Logger.debug("InvocaDebug: queuing #{[type, change, safe_dir, path, options]} to queue with depth #{@event_queue.size}")
 
-        event_queue.public_send(:<<, [type, change, dir, path, options])
+        @event_queue << [type, change, safe_dir, path, options]
 
-        block.call(args) if block
+        @block&.call(args)
       end
 
-      delegate empty?: :event_queue
-      delegate pop: :event_queue
+      delegate empty?: :@event_queue
+      delegate pop: :@event_queue
 
       private
 
-      attr_reader :event_queue
-      attr_reader :block
-      attr_reader :config
-
-      def _safe_relative_from_cwd(dir)
-        return dir unless config.relative?
-        dir.relative_path_from(Pathname.pwd)
-      rescue ArgumentError
-        dir
+      def _safe_relative_from_cwd(dir, relative)
+        if relative
+          begin
+            dir.relative_path_from(Pathname.pwd)
+          rescue ArgumentError
+            dir
+          end
+        else
+          dir
+        end
       end
     end
   end

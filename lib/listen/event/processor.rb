@@ -5,7 +5,8 @@ module Listen
     class Processor
       def initialize(config, reasons)
         @config = config
-        @reasons = reasons
+        @listener = config.listener
+        @reasons = reasons # @wakeup_reasons
         _reset_no_unprocessed_events
       end
 
@@ -24,14 +25,11 @@ module Listen
           Listen::Logger.debug("InvocaDebug: about to _process_changes")
           _process_changes
         end
-      rescue Stopped
+      catch :stopped
         Listen::Logger.debug('Processing stopped')
       end
 
       private
-
-      class Stopped < RuntimeError
-      end
 
       def _wait_until_events_calm_down
         loop do
@@ -40,7 +38,7 @@ module Listen
           # Assure there's at least latency between callbacks to allow
           # for accumulating changes
           diff = _deadline - now
-          break if diff <= 0
+          diff <= 0 and break
 
           # give events a bit of time to accumulate so they can be
           # compressed/optimized
@@ -50,24 +48,28 @@ module Listen
 
       def _wait_until_no_longer_paused
         # TODO: may not be a good idea?
-        _sleep(:waiting_for_unpause) while config.paused?
+        while @listener.paused?
+          _sleep(:waiting_for_unpause)
+        end
       end
 
       def _check_stopped
-        return unless config.stopped?
-
-        _flush_wakeup_reasons
-        raise Stopped
+        if @listener.stopped?
+          _flush_wakeup_reasons
+          throw :stopped
+        end
       end
 
       def _sleep(_local_reason, *args)
         _check_stopped
-        sleep_duration = config.sleep(*args)
+        sleep_duration = @config.sleep(*args)
         _check_stopped
 
         _flush_wakeup_reasons do |reason|
-          next unless reason == :event
-          _remember_time_of_first_unprocessed_event unless config.paused?
+          next if reason != :event # wakeup_reason
+          unless @listener.paused?
+            _remember_time_of_first_unprocessed_event
+          end
         end
 
         sleep_duration
@@ -87,20 +89,19 @@ module Listen
 
       def _wait_until_events
         # TODO: long sleep may not be a good idea?
-        _sleep(:waiting_for_events) while config.event_queue.empty?
+        _sleep(:waiting_for_events) while @config.event_queue.empty?
         @first_unprocessed_event_time ||= _timestamp
       end
 
       def _flush_wakeup_reasons
-        reasons = @reasons
-        until reasons.empty?
-          reason = reasons.pop
+        until @reasons.empty? # @wakeup_reasons
+          reason = @reasons.pop
           yield reason if block_given?
         end
       end
 
       def _timestamp
-        config.timestamp
+        @config.timestamp
       end
 
       # for easier testing without sleep loop
@@ -108,25 +109,22 @@ module Listen
         _reset_no_unprocessed_events
 
         changes = []
-        changes << config.event_queue.pop until config.event_queue.empty?
+        changes << @config.event_queue.pop until @config.event_queue.empty?
 
         Listen::Logger.debug("InvocaDebug: _process_changes popped #{changes.size}")
 
-        callable = config.callable?
-        return unless callable
+        if @config.callable?
+          hash = @config.optimize_changes(changes)
+          result = [hash[:modified], hash[:added], hash[:removed]]
+          if result.all?(&:empty?)
+            Listen::Logger.debug("InvocaDebug: _process_changes returning because #{changes.inspect} optimized to empty")
+          end
 
-        hash = config.optimize_changes(changes)
-        result = [hash[:modified], hash[:added], hash[:removed]]
-        if result.all?(&:empty?)
-          Listen::Logger.debug("InvocaDebug: _process_changes returning because #{changes.inspect} optimized to empty")
+          block_start = _timestamp
+          @config.call(*result)
+          Listen::Logger.debug "Callback took #{_timestamp - block_start} sec"
         end
-
-        block_start = _timestamp
-        config.call(*result)
-        Listen::Logger.debug "Callback took #{_timestamp - block_start} sec"
       end
-
-      attr_reader :config
     end
   end
 end

@@ -45,19 +45,23 @@ module Listen
       private
 
       def _join
-        args = [@relative, @name].compact
-        args.empty? ? nil : ::File.join(*args)
+        if (args = [@relative, @name].compact).any?
+          ::File.join(*args)
+        end
       end
 
       def _entries(dir)
-        return Dir.entries(dir) unless RUBY_ENGINE == 'jruby'
+        if RUBY_ENGINE == 'jruby'
+          # JRuby inconsistency workaround, see:
+          # https://github.com/jruby/jruby/issues/3840
+          if ::File.exist?(dir) && !::File.directory?(dir)
+            raise Errno::ENOTDIR, dir
+          end
 
-        # JRuby inconsistency workaround, see:
-        # https://github.com/jruby/jruby/issues/3840
-        exists = ::File.exist?(dir)
-        directory = ::File.directory?(dir)
-        return Dir.entries(dir) unless exists && !directory
-        raise Errno::ENOTDIR, dir
+          Dir.entries(dir)
+        else
+          Dir.entries(dir)
+        end
       end
     end
   end

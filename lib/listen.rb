@@ -18,6 +18,8 @@ Listen::Logger.info "Listen loglevel set to: #{Listen.logger.level}"
 Listen::Logger.info "Listen version: #{Listen::VERSION}"
 
 module Listen
+  @listeners = []
+
   class << self
     # Listens to file system modifications on a either single directory or
     # multiple directories.
@@ -32,7 +34,6 @@ module Listen
     # @return [Listen::Listener] the listener
     #
     def to(*args, &block)
-      @listeners ||= []
       Listener.new(*args, &block).tap do |listener|
         @listeners << listener
       end
@@ -42,11 +43,11 @@ module Listen
     #
     def stop
       Internals::ThreadPool.stop
-      @listeners ||= []
 
       # TODO: should use a mutex for this
-      @listeners.each(&:stop)
-      @listeners = nil
+      while (listener = @listeners.pop)
+        listener.stop
+      end
     end
   end
 end

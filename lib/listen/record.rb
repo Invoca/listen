@@ -14,8 +14,9 @@ module Listen
     end
 
     def add_dir(rel_path)
-      return if [nil, '', '.'].include? rel_path
-      @tree[rel_path] ||= {}
+      if ![nil, '', '.'].include?(rel_path)
+        @tree[rel_path] ||= {}
+      end
     end
 
     def update_file(rel_path, data)
@@ -100,12 +101,14 @@ module Listen
     def _fast_unset_path(dirname, basename)
       # this may need to be reworked to properly remove
       # entries from a tree, without adding non-existing dirs to the record
-      if [nil, '', '.'].include? dirname
-        return unless tree.key?(basename)
-        tree.delete(basename)
+      if [nil, '', '.'].include?(dirname)
+        if tree.key?(basename)
+          tree.delete(basename)
+        end
       else
-        return unless tree.key?(dirname)
-        tree[dirname].delete(basename)
+        if tree.key?(dirname)
+          tree[dirname].delete(basename)
+        end
       end
     end
 

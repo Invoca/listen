@@ -18,10 +18,9 @@ require 'listen/event/config'
 require 'listen/listener/config'
 
 module Listen
-  class Listener
-    # TODO: move the state machine's methods private
-    include Listen::FSM
+  # This object is what's return by `Listen.to`. So it's the public interface for `start`, `stop`, `pause` etc.
 
+  class Listener
     # Initializes the directories listener.
     #
     # @param [String] directory the directories to listen to
@@ -32,111 +31,33 @@ module Listen
     # @yieldparam [Array<String>] added the list of added files
     # @yieldparam [Array<String>] removed the list of removed files
     #
-    def initialize(*dirs, &block)
-      options = dirs.last.is_a?(Hash) ? dirs.pop : {}
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Config.new")
-
+    def initialize(*dirs, **options, &block)
+      @dirs = dirs
       @config = Config.new(options)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Queue::Config.new")
-
-      eq_config = Event::Queue::Config.new(@config.relative?)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Queue.new")
-
-      queue = Event::Queue.new(eq_config) { @processor.wakeup_on_event }
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Silencer.new")
-
-      silencer = Silencer.new
-      rules = @config.silencer_rules
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Silencer::Controller.new")
-
-      @silencer_controller = Silencer::Controller.new(silencer, rules)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Backend.new")
-
-      @backend = Backend.new(dirs, queue, silencer, @config)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call QueueOptimizer::Config.new")
-
-      optimizer_config = QueueOptimizer::Config.new(@backend, silencer)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Config.new")
-
-      pconfig = Event::Config.new(
-        self,
-        queue,
-        QueueOptimizer.new(optimizer_config),
-        @backend.min_delay_between_events,
-        &block)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Loop.new")
-
-      @processor = Event::Loop.new(pconfig)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call super")
-
-      super() # FSM
+      @block = block
+      @active_listener = nil
+      @silencer_controller = Silencer::Controller.new(Silencer.new, @config.silencer_rules) # Is this used?
     end
 
-    default_state :initializing
-
-    state :initializing, to: [:backend_started, :stopped]
-
-    state :backend_started, to: [:frontend_ready, :stopped] do
-      backend.start
-    end
-
-    state :frontend_ready, to: [:processing_events, :stopped] do
-      processor.setup
-    end
-
-    state :processing_events, to: [:paused, :stopped] do
-      processor.resume
-    end
-
-    state :paused, to: [:processing_events, :stopped] do
-      processor.pause
-    end
-
-    state :stopped, to: [:backend_started] do
-      backend.stop # should be before processor.teardown to halt events ASAP
-      processor.teardown
-    end
-
-    # Starts processing events and starts adapters
-    # or resumes invoking callbacks if paused
     def start
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :backend_started state: #{state}")
-      transition :backend_started if state == :initializing
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :frontend_ready state: #{state}")
-      transition :frontend_ready if state == :backend_started
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :processing_events state: #{state}")
-      transition :processing_events if state == :frontend_ready
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :processing_events state: #{state}")
-      transition :processing_events if state == :paused
+      @active_listener ||= ActiveListener.new(@dirs, @config.relative, &@block)
     end
 
-    # Stops both listening for events and processing them
-    def stop
-      transition :stopped
-    end
-
-    # Stops invoking callbacks (messages pile up)
     def pause
-      transition :paused
+      @active_listener&.pause
     end
 
-    # processing means callbacks are called
-    def processing?
-      state == :processing_events
+    def stop
+      @active_listener&.stop
+      @active_listener = nil
     end
 
     def paused?
-      state == :paused
+      @active_listener&.paused?
+    end
+
+    def stopped?
+      !@active_listener
     end
 
     def ignore(regexps)
@@ -150,10 +71,61 @@ module Listen
     def only(regexps)
       @silencer_controller.replace_with_only(regexps)
     end
+  end
 
-    private
+  class ActiveListener
+    def initialize(dirs, config_relative, &block)
+      @processor = nil
+      queue = Event::Queue.new(config_relative) { @processor.wakeup_on_event }
 
-    attr_reader :processor
-    attr_reader :backend
+      silencer = Silencer.new
+
+      @pconfig = Event::Config.new(
+        self,
+        queue,
+        QueueOptimizer.new(QueueOptimizer::Config.new(@backend, silencer)),
+        @backend.min_delay_between_events,
+        &block)
+
+      @processor = Event::Loop.new(@pconfig)
+
+      @state = :started
+
+      @backend = Backend.new(dirs, queue, silencer, @config)
+    end
+
+    # If paused, resumes invoking callbacks
+    def start
+      state == :paused or raise ArgumentError, "can't start from state #{state}"
+
+      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :started state: #{state}")
+      @processor.resume
+      @state = :started
+    end
+
+    # Stops both listening for events and processing them
+    def stop
+      @backend.stop # should be before @processor.teardown to halt events ASAP
+      @backend = nil
+      @processor.stop
+      @processor = nil
+      @state = nil
+    end
+
+    # Stops frontend callbacks (messages pile up)
+    def pause
+      # Not implemented
+      @processor.pause
+      @state = :paused
+    end
+
+    # processing means callbacks are called
+    def processing?
+      @state == :started
+    end
+
+    def paused?
+      @state == :paused
+    end
   end
 end

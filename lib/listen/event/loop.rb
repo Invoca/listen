@@ -5,97 +5,81 @@ require 'listen/event/processor'
 
 module Listen
   module Event
+    # Caller stores instance in @processor. Why not call it Processor?
     class Loop
-      class Error < RuntimeError
-        class NotStarted < Error
-        end
-      end
+      class Error < RuntimeError; end
+      class Error::NotStarted < Error; end
 
       def initialize(config)
         @config = config
-        @wait_thread = nil
         @state = :paused
-        @reasons = ::Queue.new
-      end
+        @reasons = ::Queue.new # @wakeup_reasons
 
-      def wakeup_on_event
-        return if stopped?
-        return unless processing?
-        return unless wait_thread.alive?
-        _wakeup(:event)
-      end
-
-      def paused?
-        wait_thread && state == :paused
-      end
-
-      def processing?
-        return false if stopped?
-        return false if paused?
-        state == :processing
-      end
-
-      def setup
-        # TODO: use a Fiber instead?
-        q = ::Queue.new
         @wait_thread = Internals::ThreadPool.add do
-          _wait_for_changes(q, config)
+          process_events(config)
         end
 
         Listen::Logger.debug('Waiting for processing to start...')
-        Timeout.timeout(5) { q.pop }
+        @mutex.synchronize do
+          if @state != :processing
+            @processing.wait
+          end
+        end
+        Listen::Logger.debug('...processing started')
+      end
+
+      def wakeup_on_event
+        if processing? && @wait_thread.alive?
+          _wakeup(:event)
+        end
+      end
+
+      private \
+      def processing?
+        @state == :processing
       end
 
       def resume
-        fail Error::NotStarted if stopped?
-        return unless wait_thread
         _wakeup(:resume)
       end
 
       def pause
         # TODO: works?
-        # fail NotImplementedError
+        raise NotImplementedError
       end
 
-      def teardown
-        return unless wait_thread
-        if wait_thread.alive?
+      def stop
+        if @wait_thread.alive?
           _wakeup(:teardown)
-          wait_thread.join
+          @wait_thread.join
         end
-        @wait_thread = nil
-      end
 
-      def stopped?
-        !wait_thread
+        @wait_thread = nil
       end
 
       private
 
       attr_reader :config
-      attr_reader :wait_thread
 
-      attr_accessor :state
+      def process_events(config)
+        processor = Event::Processor.new(config, @reasons) # @wakeup_reasons
 
-      def _wait_for_changes(ready_queue, config)
-        processor = Event::Processor.new(config, @reasons)
+        @mutex.synchronize do
+          @state = :processing
+          @processing.signal
+        end
 
-        _wait_until_resumed(ready_queue)
         processor.loop_for(config.min_delay_between_events)
+
       rescue StandardError => ex
         _nice_error(ex)
       end
 
-      def _sleep(*args)
-        Kernel.sleep(*args)
-      end
+      # Apparently unused?
 
-      def _wait_until_resumed(ready_queue)
-        self.state = :paused
-        ready_queue << :ready
-        sleep
-        self.state = :processing
-      end
+      # def _sleep(*args)
+      #   Kernel.sleep(*args)
+      # end
 
       def _nice_error(ex)
         indent = "\n -- "
@@ -109,8 +93,8 @@ module Listen
       end
 
       def _wakeup(reason)
-        @reasons << reason
-        wait_thread.wakeup
+        @reasons << reason # @wakeup_reasons
+        @wait_thread.wakeup
       end
     end
   end

@@ -7,17 +7,12 @@ module Listen
         @options[key] = given_options.delete(key) || defaults[key]
       end
 
-      return if given_options.empty?
-
-      msg = "Unknown options: #{given_options.inspect}"
-      Listen::Logger.warn msg
-      fail msg
+      given_options.empty? or raise ArgumentError, "Unknown options: #{given_options.inspect}"
     end
 
     def method_missing(name, *_)
-      return @options[name] if @options.key?(name)
-      msg = "Bad option: #{name.inspect} (valid:#{@options.keys.inspect})"
-      fail NameError, msg
+      @options.key?(name) or raise NameError, "Bad option: #{name.inspect} (valid:#{@options.keys.inspect})"
+      @options[name]
     end
   end
 end

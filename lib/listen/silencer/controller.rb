@@ -8,7 +8,7 @@ module Listen
 
         @prev_silencer_options = {}
         rules = [:only, :ignore, :ignore!].map do |option|
-          [option, opts[option]] if opts.key? option
+          [option, opts[option]] if opts.key?(option)
         end
 
         _reconfigure_silencer(Hash[rules.compact])
