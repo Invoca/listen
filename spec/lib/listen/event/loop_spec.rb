@@ -62,7 +62,7 @@ RSpec.describe Listen::Event::Loop do
     end
 
     it 'sets up the thread in a resumable state' do
-      subject.setup
+      subject.start
 
       expect(subject).to receive(:sleep).with(no_args)
       allow(processor).to receive(:loop_for).with(1.234)
@@ -88,7 +88,7 @@ RSpec.describe Listen::Event::Loop do
 
   context 'when resumed' do
     before do
-      subject.setup
+      subject.start
 
       allow(thread).to receive(:wakeup) do
         allow(subject).to receive(:sleep).with(no_args)
@@ -101,8 +101,8 @@ RSpec.describe Listen::Event::Loop do
       subject.resume
     end
 
-    it 'is not paused' do
-      expect(subject).to_not be_paused
+    it 'is started' do
+      expect(subject).to be_started
     end
 
     context 'when resume is called again' do
@@ -151,7 +151,7 @@ RSpec.describe Listen::Event::Loop do
 
       allow(thread).to receive(:wakeup)
 
-      subject.setup
+      subject.start
 
       allow(subject).to receive(:sleep).with(no_args) do
         allow(processor).to receive(:loop_for).with(1.234)
