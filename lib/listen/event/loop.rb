@@ -58,7 +58,6 @@ module Listen
         _transition!(:stopped)
 
         if @wait_thread.alive?
-          _wakeup(:teardown)
           @wait_thread.join
         end
         @wait_thread = nil
