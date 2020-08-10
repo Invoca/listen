@@ -128,22 +128,22 @@ RSpec.describe Listen::Event::Loop do
       subject.start
     end
 
-    describe '#teardown' do
+    describe '#stop' do
       before do
         allow(thread).to receive(:join)
       end
 
       it 'frees the thread' do
-        subject.teardown
+        subject.stop
       end
 
       it 'waits for the thread to finish' do
         expect(thread).to receive(:join)
-        subject.teardown
+        subject.stop
       end
 
       it 'sets the reason for waking up' do
-        subject.teardown
+        subject.stop
       end
     end
   end
