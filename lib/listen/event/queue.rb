@@ -20,8 +20,8 @@ module Listen
       end
 
       def initialize(config, &block)
+        block and raise ArgumentError, "&block no longer needed"
         @event_queue = ::Queue.new
-        @block = block
         @config = config
       end
 
@@ -36,17 +36,15 @@ module Listen
         Listen::Logger.debug("InvocaDebug: queuing #{[type, change, dir, path, options]} to queue with depth #{event_queue.size}")
 
         event_queue.public_send(:<<, [type, change, dir, path, options])
-
-        block.call(args) if block
       end
 
       delegate empty?: :event_queue
       delegate pop: :event_queue
+      delegate close: :event_queue
 
       private
 
       attr_reader :event_queue
-      attr_reader :block
       attr_reader :config
 
       def _safe_relative_from_cwd(dir)

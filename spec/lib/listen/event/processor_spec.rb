@@ -3,7 +3,9 @@ require 'listen/event/config'
 
 RSpec.describe Listen::Event::Processor do
   let(:event_queue) { instance_double(::Queue, 'event_queue') }
-  let(:config) { instance_double(Listen::Event::Config) }
+  let(:event) { instance_double(::Array, 'event') }
+  let(:listener) { instance_double(Listen::Listener, 'listener') }
+  let(:config) { instance_double(Listen::Event::Config, 'config', listener: listener) }
   let(:reasons) { instance_double(::Queue, 'reasons') }
 
   subject { described_class.new(config, reasons) }
@@ -27,11 +29,11 @@ RSpec.describe Listen::Event::Processor do
   before do
     allow(config).to receive(:event_queue).and_return(event_queue)
 
-    allow(config).to receive(:stopped?) do
+    allow(listener).to receive(:stopped?) do
       status_for_time(state[:time]) == :stopped
     end
 
-    allow(config).to receive(:paused?) do
+    allow(listener).to receive(:paused?) do
       status_for_time(state[:time]) == :paused
     end
 
@@ -56,11 +58,13 @@ RSpec.describe Listen::Event::Processor do
         end
 
         it 'does not change the event queue' do
+          expect(event_queue).to receive(:pop).and_return(event)
           subject.loop_for(1)
         end
 
         it 'does not sleep' do
           expect(config).to_not receive(:sleep)
+          expect(event_queue).to receive(:pop).and_return(event)
           t = Time.now.to_f
           subject.loop_for(1)
           diff = Time.now.to_f - t
@@ -86,10 +90,12 @@ RSpec.describe Listen::Event::Processor do
 
           it 'sleeps, waiting to be woken up' do
             expect(config).to receive(:sleep).once { state[:time] = 0.6 }
+            expect(event_queue).to receive(:pop).and_return(event)
             subject.loop_for(1)
           end
 
           it 'breaks' do
+            expect(event_queue).to receive(:pop).and_return(event)
             allow(config).to receive(:sleep).once { state[:time] = 0.6 }
             expect(config).to_not receive(:call)
             subject.loop_for(1)
@@ -105,12 +111,13 @@ RSpec.describe Listen::Event::Processor do
             it 'sleeps for latency to possibly later optimize some events' do
               # pretend we were woken up at 0.6 seconds since start
               allow(config).to receive(:sleep).
-                with(no_args) { |*_args| state[:time] += 0.6 }
+                with(anything) { |*_args| state[:time] += 0.6 }
 
               # pretend we slept for latency (now: 1.6 seconds since start)
               allow(config).to receive(:sleep).
                 with(1.0) { |*_args| state[:time] += 1.0 }
 
+              expect(event_queue).to receive(:pop).and_return(event)
               subject.loop_for(1)
             end
           end
@@ -123,16 +130,20 @@ RSpec.describe Listen::Event::Processor do
             it 'still does not process events because it is paused' do
               # pretend we were woken up at 0.6 seconds since start
               allow(config).to receive(:sleep).
-                with(no_args) { |*_args| state[:time] += 2.0 }
+                with(anything) { |*_args| state[:time] += 2.0 }
 
               # second loop starts here (no sleep, coz recent events, but no
               # processing coz paused
 
               # pretend we were woken up at 3.6 seconds since start
-              allow(config).to receive(:sleep).
-                with(no_args) { |*_args| state[:time] += 3.0 }
+              allow(listener).to receive(:wait_for_state).
+                with(:processing_events, :stopped) do |*_args|
+                  state[:time] += 3.0
+                  raise ScriptError, 'done'
+                end
 
-              subject.loop_for(1)
+              expect(event_queue).to receive(:pop).and_return(event)
+              expect { subject.loop_for(1) }.to raise_exception(ScriptError, 'done')
             end
           end
         end
@@ -154,6 +165,7 @@ RSpec.describe Listen::Event::Processor do
             end
 
             it 'sleeps, waiting to be woken up' do
+              expect(event_queue).to receive(:pop).and_return(event)
               expect(config).to receive(:sleep).
                 once { |*_args| state[:time] = 0.6 }
 
@@ -165,15 +177,13 @@ RSpec.describe Listen::Event::Processor do
                 once { |*_args| state[:time] = 0.6 }
 
               expect(config).to_not receive(:call)
+              expect(event_queue).to receive(:pop).and_return(event)
               subject.loop_for(1)
             end
           end
         end
 
         context 'when event queue has events' do
-          before do
-          end
-
           context 'when there were events ages ago' do
             before do
               sequence[3.5] = :stopped # in the future to break from the loop
@@ -188,9 +198,9 @@ RSpec.describe Listen::Event::Processor do
 
               change = [:file, :modified, 'foo', 'bar']
               resulting_changes = { modified: ['foo'], added: [], removed: [] }
-              allow(event_queue).to receive(:pop).and_return(change)
+              allow(event_queue).to receive(:pop).and_return(change).exactly(4)
 
-              allow(config).to receive(:optimize_changes).with([change]).
+              allow(config).to receive(:optimize_changes).with([change, change, change]).
                 and_return(resulting_changes)
 
               final_changes = [['foo'], [], []]
@@ -199,16 +209,13 @@ RSpec.describe Listen::Event::Processor do
                 expect(changes).to eq(final_changes)
               end
 
+              allow(listener).to receive(:wait_for_state).
+                with(:processing_events, :stopped)
+
               subject.instance_variable_set(:@first_unprocessed_event_time, -3)
               subject.loop_for(1)
             end
           end
-
-          #  context "when stopped after sleeping" do
-          #    it "breaks from the loop" do
-          #      pending "todo"
-          #    end
-          #  end
         end
       end
     end

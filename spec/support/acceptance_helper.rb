@@ -12,23 +12,20 @@
       # 2. keep the queue if we're testing for existing accumulated changes
 
       # if were testing the queue (e.g. after unpause), don't reset
-      check_already_queued = /queued_/ =~ description
-      reset_queue = !check_already_queued
+      reset_queue = /queued_/ !~ description
 
       actual.listen(reset_queue) do
-        change_fs(type, expected) unless check_already_queued
+        change_fs(type, expected) if reset_queue
       end
       actual.changes[type].include? expected
     end
 
     failure_message do |actual|
-      result = actual.changes.inspect
-      "expected #{result} to include #{description} of #{expected}"
+      "expected #{actual.changes.inspect} to include #{description} of #{expected}"
     end
 
     failure_message_when_negated do |actual|
-      result = actual.changes.inspect
-      "expected #{result} to not include #{description} of #{expected}"
+      "expected #{actual.changes.inspect} to not include #{description} of #{expected}"
     end
   end
 end
@@ -224,8 +221,7 @@ class ListenerWrapper
     change_offset = @timed_changes.change_offset
     freeze_offset = @timed_changes.freeze_offset
 
-    msg = "Changes took #{change_offset}s (allowed lag: #{freeze_offset})s"
-    abort(msg)
+    raise "Changes took #{change_offset}s (allowed lag: #{freeze_offset})s"
   end
 
   def _relative_path(changes)

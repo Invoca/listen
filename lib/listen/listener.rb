@@ -42,10 +42,7 @@ module Listen
       Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Queue::Config.new")
 
       eq_config = Event::Queue::Config.new(@config.relative?)
-
-      Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Event::Queue.new")
-
-      queue = Event::Queue.new(eq_config) { @processor.wakeup_on_event }
+      queue = Event::Queue.new(eq_config)
 
       Listen::Logger.debug("InvocaDebug: Listener#initialize about to call Silencer.new")
 
@@ -82,20 +79,16 @@ module Listen
       super() # FSM
     end
 
-    default_state :initializing
+    start_state :initializing
 
     state :initializing, to: [:backend_started, :stopped]
 
-    state :backend_started, to: [:frontend_ready, :stopped] do
+    state :backend_started, to: [:processing_events, :stopped] do
       backend.start
     end
 
-    state :frontend_ready, to: [:processing_events, :stopped] do
-      processor.setup
-    end
-
     state :processing_events, to: [:paused, :stopped] do
-      processor.resume
+      processor.start
     end
 
     state :paused, to: [:processing_events, :stopped] do
@@ -103,21 +96,22 @@ module Listen
     end
 
     state :stopped, to: [:backend_started] do
-      backend.stop # should be before processor.teardown to halt events ASAP
-      processor.teardown
+      backend.stop # should be before processor.stop to halt events ASAP
+      processor.stop
     end
 
     # Starts processing events and starts adapters
     # or resumes invoking callbacks if paused
     def start
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :backend_started state: #{state}")
-      transition :backend_started if state == :initializing
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :frontend_ready state: #{state}")
-      transition :frontend_ready if state == :backend_started
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :processing_events state: #{state}")
-      transition :processing_events if state == :frontend_ready
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :processing_events state: #{state}")
-      transition :processing_events if state == :paused
+      case state
+      when :initializing
+        transition :backend_started
+        transition :processing_events
+      when :paused
+        transition :processing_events
+      else
+        raise ArgumentError, "cannot start from state #{state.inspect}"
+      end
     end
 
     # Stops both listening for events and processing them
@@ -137,6 +131,10 @@ module Listen
 
     def paused?
       state == :paused
+    end
+
+    def stopped?
+      state == :stopped
     end
 
     def ignore(regexps)

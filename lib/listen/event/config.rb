@@ -1,6 +1,10 @@
 module Listen
   module Event
     class Config
+      attr_reader :listener
+      attr_reader :event_queue
+      attr_reader :min_delay_between_events
+
       def initialize(
         listener,
         event_queue,
@@ -15,8 +19,8 @@ module Listen
         @block = block
       end
 
-      def sleep(*args)
-        Kernel.sleep(*args)
+      def sleep(seconds)
+        Kernel.sleep(seconds)
       end
 
       def call(*args)
@@ -27,8 +31,6 @@ module Listen
         Time.now.to_f
       end
 
-      attr_reader :event_queue
-
       def callable?
         @block
       end
@@ -36,20 +38,6 @@ module Listen
       def optimize_changes(changes)
         @queue_optimizer.smoosh_changes(changes)
       end
-
-      attr_reader :min_delay_between_events
-
-      def stopped?
-        listener.state == :stopped
-      end
-
-      def paused?
-        listener.state == :paused
-      end
-
-      private
-
-      attr_reader :listener
     end
   end
 end

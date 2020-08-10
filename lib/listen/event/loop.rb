@@ -6,50 +6,52 @@ require 'listen/event/processor'
 module Listen
   module Event
     class Loop
+      include Listen::FSM
+
       class Error < RuntimeError
-        class NotStarted < Error
-        end
+        class ThreadFailedToStart < Error; end
+        class AlreadyStarted < Error; end
       end
+
+      start_state :pre_start
+      state :pre_start
+      state :starting
+      state :started
+      state :stopped
 
       def initialize(config)
         @config = config
         @wait_thread = nil
-        @state = :paused
         @reasons = ::Queue.new
+        super()
       end
 
       def wakeup_on_event
-        return if stopped?
-        return unless processing?
-        return unless wait_thread.alive?
-        _wakeup(:event)
+        if started? && @wait_thread&.alive?
+          _wakeup(:event)
+        end
       end
 
-      def paused?
-        wait_thread && state == :paused
+      def started?
+        state == :started
       end
 
-      def processing?
-        return false if stopped?
-        return false if paused?
-        state == :processing
-      end
+      MAX_STARTUP_SECONDS = 5.0
 
-      def setup
-        # TODO: use a Fiber instead?
-        q = ::Queue.new
-        @wait_thread = Internals::ThreadPool.add do
-          _wait_for_changes(q, config)
+      def start
+        transition! :starting do
+          state == :pre_start or raise Error::AlreadyStarted
         end
 
-        Listen::Logger.debug('Waiting for processing to start...')
-        Timeout.timeout(5) { q.pop }
-      end
+        @wait_thread = Internals::ThreadPool.add do
+          _process_changes
+        end
 
-      def resume
-        fail Error::NotStarted if stopped?
-        return unless wait_thread
-        _wakeup(:resume)
+        Listen::Logger.debug("Waiting for processing to start...")
+
+        wait_for_state(:started, MAX_STARTUP_SECONDS) or raise Error::ThreadFailedToStart, "thread didn't start in #{MAX_STARTUP_SECONDS} seconds (in state: #{state.inspect})"
+
+        Listen::Logger.debug('Processing started.')
       end
 
       def pause
@@ -57,44 +59,31 @@ module Listen
         # fail NotImplementedError
       end
 
-      def teardown
-        return unless wait_thread
-        if wait_thread.alive?
-          _wakeup(:teardown)
-          wait_thread.join
+      def stop
+        return if stopped?
+        transition! :stopped
+
+        if @wait_thread.alive?
+          @wait_thread.join
         end
         @wait_thread = nil
       end
 
       def stopped?
-        !wait_thread
+        state == :stopped
       end
 
       private
 
-      attr_reader :config
-      attr_reader :wait_thread
+      def _process_changes
+        processor = Event::Processor.new(@config, @reasons)
 
-      attr_accessor :state
+        transition! :started
 
-      def _wait_for_changes(ready_queue, config)
-        processor = Event::Processor.new(config, @reasons)
+        processor.loop_for(@config.min_delay_between_events)
 
-        _wait_until_resumed(ready_queue)
-        processor.loop_for(config.min_delay_between_events)
       rescue StandardError => ex
         _nice_error(ex)
-      end
-
-      def _sleep(*args)
-        Kernel.sleep(*args)
-      end
-
-      def _wait_until_resumed(ready_queue)
-        self.state = :paused
-        ready_queue << :ready
-        sleep
-        self.state = :processing
       end
 
       def _nice_error(ex)
@@ -110,7 +99,7 @@ module Listen
 
       def _wakeup(reason)
         @reasons << reason
-        wait_thread.wakeup
+        @wait_thread.wakeup
       end
     end
   end
