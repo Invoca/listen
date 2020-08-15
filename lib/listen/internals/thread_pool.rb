@@ -36,6 +36,7 @@ module Listen
             th.join(*limit) unless th[:listen_blocking_read_thread]
           end
         end
+      end
     end
   end
 end

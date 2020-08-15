@@ -11,8 +11,6 @@ RSpec.describe Listen::QueueOptimizer do
   let(:ignored) { fake_path('ignored') }
 
   before do
-    allow(config).to receive(:debug)
-
     allow(dir).to receive(:+).with('foo') { foo }
     allow(dir).to receive(:+).with('bar') { bar }
     allow(dir).to receive(:+).with('ignored') { ignored }
@@ -46,7 +44,7 @@ RSpec.describe Listen::QueueOptimizer do
       it { is_expected.to eq(modified: ['foo'], added: [], removed: []) }
     end
 
-    context 'with a deteted temp file' do
+    context 'with a detected temp file' do
       before { allow(config).to receive(:exist?).with(foo).and_return(false) }
 
       let(:changes) do

@@ -79,5 +79,6 @@ module Listen
   
         [stat.mtime, stat.ctime, stat.atime].map(&:usec).all?(&:zero?)
       end
+    end
   end
 end

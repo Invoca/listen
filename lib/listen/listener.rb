@@ -40,7 +40,7 @@ module Listen
     end
 
     def start
-      @active_listener ||= ActiveListener.new(@dirs, @config.relative, &@block)
+      @active_listener ||= ActiveListener.new(@dirs, @config.relative?, &@block)
     end
 
     def pause
@@ -56,29 +56,21 @@ module Listen
       @active_listener&.paused?
     end
 
-    def stopped?
-      !@active_listener
-    end
-
-    def ignore(regexps)
-      @silencer_controller.append_ignores(regexps)
-    end
-
-    def ignore!(regexps)
-      @silencer_controller.replace_with_bang_ignores(regexps)
-    end
-
     def only(regexps)
       @silencer_controller.replace_with_only(regexps)
     end
   end
 
   class ActiveListener
+    include FSM
+
     def initialize(dirs, config_relative, &block)
       @processor = nil
       queue = Event::Queue.new(config_relative) { @processor.wakeup_on_event }
 
       silencer = Silencer.new
+
+      @backend = Backend.new(dirs, queue, silencer, @config)
 
       @pconfig = Event::Config.new(
         self,
@@ -89,18 +81,44 @@ module Listen
 
       @processor = Event::Loop.new(@pconfig)
 
-      @state = :started
+      super()
 
-      @backend = Backend.new(dirs, queue, silencer, @config)
+      @state = :started
     end
 
-    # If paused, resumes invoking callbacks
-    def start
-      state == :paused or raise ArgumentError, "can't start from state #{state}"
+    start_state :initializing
 
-      Listen::Logger.debug("InvocaDebug: Listener#start about to transition :started state: #{state}")
-      @processor.resume
-      @state = :started
+    state :initializing, to: [:backend_started, :stopped]
+
+    state :backend_started, to: [:processing_events, :stopped] do
+      backend.start
+    end
+
+    state :processing_events, to: [:paused, :stopped] do
+      processor.start
+    end
+
+    state :paused, to: [:processing_events, :stopped] do
+      processor.pause
+    end
+
+    state :stopped, to: [:backend_started] do
+      backend.stop # should be before processor.stop to halt events ASAP
+      processor.stop
+    end
+
+    # Starts processing events and starts adapters
+    # or resumes invoking callbacks if paused
+    def start
+      case state
+      when :initializing
+        transition :backend_started
+        transition :processing_events
+      when :paused
+        transition :processing_events
+      else
+        raise ArgumentError, "cannot start from state #{state.inspect}"
+      end
     end
 
     # Stops both listening for events and processing them
@@ -125,7 +143,15 @@ module Listen
     end
 
     def paused?
-      @state == :paused
+      state == :paused
+    end
+
+    def stopped?
+      state == :stopped
+    end
+
+    def ignore(regexps)
+      @silencer_controller.append_ignores(regexps)
     end
   end
 end

@@ -7,40 +7,52 @@ module Listen
   module Event
     # Caller stores instance in @processor. Why not call it Processor?
     class Loop
-      class Error < RuntimeError; end
-      class Error::NotStarted < Error; end
+      include Listen::FSM
+
+      class Error < RuntimeError
+        class ThreadFailedToStart < Error; end
+        class AlreadyStarted < Error; end
+      end
+
+      start_state :pre_start
+      state :pre_start
+      state :starting
+      state :started
+      state :stopped
 
       def initialize(config)
         @config = config
-        @state = :paused
-        @reasons = ::Queue.new # @wakeup_reasons
-
-        @wait_thread = Internals::ThreadPool.add do
-          process_events(config)
-        end
-
-        Listen::Logger.debug('Waiting for processing to start...')
-        @mutex.synchronize do
-          if @state != :processing
-            @processing.wait
-          end
-        end
-        Listen::Logger.debug('...processing started')
+        @wait_thread = nil
+        @reasons = ::Queue.new
+        super()
       end
 
       def wakeup_on_event
-        if processing? && @wait_thread.alive?
+        if started? && @wait_thread&.alive?
           _wakeup(:event)
         end
       end
 
-      private \
-      def processing?
-        @state == :processing
+      def started?
+        state == :started
       end
 
-      def resume
-        _wakeup(:resume)
+      MAX_STARTUP_SECONDS = 5.0
+
+      def start
+        transition! :starting do
+          state == :pre_start or raise Error::AlreadyStarted
+        end
+
+        @wait_thread = Internals::ThreadPool.add do
+          _process_changes
+        end
+
+        Listen::Logger.debug("Waiting for processing to start...")
+
+        wait_for_state(:started, MAX_STARTUP_SECONDS) or raise Error::ThreadFailedToStart, "thread didn't start in #{MAX_STARTUP_SECONDS} seconds (in state: #{state.inspect})"
+
+        Listen::Logger.debug('Processing started.')
       end
 
       def pause
@@ -49,37 +61,32 @@ module Listen
       end
 
       def stop
+        return if stopped?
+        transition! :stopped
+
         if @wait_thread.alive?
-          _wakeup(:teardown)
           @wait_thread.join
         end
 
         @wait_thread = nil
       end
 
+      def stopped?
+        state == :stopped
+      end
+
       private
 
-      attr_reader :config
+      def _process_changes
+        processor = Event::Processor.new(@config, @reasons)
 
-      def process_events(config)
-        processor = Event::Processor.new(config, @reasons) # @wakeup_reasons
+        transition! :started
 
-        @mutex.synchronize do
-          @state = :processing
-          @processing.signal
-        end
-
-        processor.loop_for(config.min_delay_between_events)
+        processor.loop_for(@config.min_delay_between_events)
 
       rescue StandardError => ex
         _nice_error(ex)
       end
-
-      # Apparently unused?
-
-      # def _sleep(*args)
-      #   Kernel.sleep(*args)
-      # end
 
       def _nice_error(ex)
         indent = "\n -- "

@@ -76,12 +76,7 @@ module Listen
 
       def stop
         _stop
-      end
-
-      class << self
-        def usable?
-          const_get('OS_REGEXP') =~ RbConfig::CONFIG['target_os']
-        end
+        config.queue.close # this causes queue.pop to return `nil` to the front-end
       end
 
       private
@@ -123,7 +118,9 @@ module Listen
       end
 
       class << self
-        private
+        def usable?
+          const_get('OS_REGEXP') =~ RbConfig::CONFIG['target_os']
+        end
 
         def _log(*args, &block)
           Listen::Logger.send(*args, &block)

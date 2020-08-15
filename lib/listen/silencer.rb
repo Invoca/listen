@@ -73,12 +73,12 @@ module Listen
     def silenced?(relative_path, type)
       path = relative_path.to_s
 
-      silenced_only_patterns(path) || silenced_ignore_patterns(path)
+      silenced_only_patterns(path, type) || silenced_ignore_patterns(path)
     end
 
     private
 
-    def silenced_only_patterns(path)
+    def silenced_only_patterns(path, type)
       type == :file && only_patterns && !only_patterns.any? { |pattern| path =~ pattern }
     end
 

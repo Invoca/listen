@@ -1,7 +1,10 @@
 # Code copied from https://github.com/celluloid/celluloid-fsm
+
+require 'thread'
+
 module Listen
   module FSM
-    DEFAULT_STATE = :default # Default state name unless one is explicitly set
+    START_STATE = :default # Start state name unless one is explicitly set
 
     # Included hook to extend class methods
     def self.included(klass)
@@ -9,112 +12,108 @@ module Listen
     end
 
     module ClassMethods
-      # Obtain or set the default state
-      # Passing a state name sets the default state
-      def default_state(new_default = nil)
-        if new_default
-          @default_state = new_default.to_sym
+      # Obtain or set the start state
+      # Passing a state name sets the start state
+      def start_state(new_start_state = nil)
+        if new_start_state
+          new_start_state.is_a?(Symbol) or raise ArgumentError, "state name must be a Symbol (got #{new_start_state.inspect})"
+          @start_state = new_start_state
         else
-          defined?(@default_state) ? @default_state : DEFAULT_STATE
+          defined?(@start_state) ? @start_state : START_STATE
         end
       end
 
-      # Obtain the valid states for this FSM
+      # The valid states for this FSM, as a hash with state name symbols as keys and State objects as values.
       def states
         @states ||= {}
       end
 
-      # Declare an FSM state and optionally provide a callback block to fire
+      # Declare an FSM state and optionally provide a callback block to fire on state entry
       # Options:
       # * to: a state or array of states this state can transition to
-      def state(*args, &block)
-        if args.last.is_a? Hash
-          # Stringify keys :/
-          options = args.pop.each_with_object({}) { |(k, v), h| h[k.to_s] = v }
-        else
-          options = {}
-        end
-
-        args.each do |name|
-          name = name.to_sym
-          default_state name if options['default']
-          states[name] = State.new(name, options['to'], &block)
-        end
+      def state(state_name, to: nil, &block)
+        state_name.is_a?(Symbol) or raise ArgumentError, "state name must be a Symbol (got #{state_name.inspect})"
+        states[state_name] = State.new(state_name, to, &block)
       end
     end
 
-    # Be kind and call super if you must redefine initialize
+    # Note: you must call super() from including classes so this code will run
     def initialize
-      @state = self.class.default_state
+      @state = self.class.start_state
+      @mutex = ::Mutex.new
+      @state_changed = ::ConditionVariable.new
+      super
     end
 
-    # Obtain the current state of the FSM
+    # Current state of the FSM, stored as a symbol
     attr_reader :state
 
-    def transition(state_name)
-      new_state = validate_and_sanitize_new_state(state_name)
-      return unless new_state
-      transition_with_callbacks!(new_state)
+    def transition(new_state_name)
+      new_state_name.is_a?(Symbol) or raise ArgumentError, "state name must be a Symbol (got #{new_state_name.inspect})"
+      if (new_state = validate_and_sanitize_new_state(new_state_name))
+        transition_with_callbacks!(new_state)
+      end
     end
 
-    # Immediate state transition with no checks, or callbacks. "Dangerous!"
-    def transition!(state_name)
-      @state = state_name
+    # Low-level, immediate state transition with no checks or callbacks.
+    def transition!(new_state_name)
+      new_state_name.is_a?(Symbol) or raise ArgumentError, "state name must be a Symbol (got #{new_state_name.inspect})"
+      @mutex or raise ArgumentError, "FSM not initialized. You must call super() from initialize!"
+      @mutex.synchronize do
+        yield if block_given?
+        @state = new_state_name
+        @state_changed.broadcast
+      end
+    end
+
+    # checks for one of the given states to wait for
+    # if not already, waits for a state change (up to timeout seconds--`nil` means infinite)
+    # returns truthy iff the transition to one of the desired state has occurred
+    def wait_for_state(*wait_for_states, timeout: nil)
+      @mutex.synchronize do
+        if !wait_for_states.include?(@state)
+          @state_changed.wait(@mutex, timeout)
+        end
+        wait_for_states.include?(@state)
+      end
     end
 
     protected
 
-    def validate_and_sanitize_new_state(state_name)
-      state_name = state_name.to_sym
+    def validate_and_sanitize_new_state(new_state_name)
+      return nil if @state == new_state_name
 
-      return if current_state_name == state_name
-
-      if current_state && !current_state.valid_transition?(state_name)
+      if current_state && !current_state.valid_transition?(new_state_name)
         valid = current_state.transitions.map(&:to_s).join(', ')
-        msg = "#{self.class} can't change state from '#{@state}'"\
-          " to '#{state_name}', only to: #{valid}"
-        fail ArgumentError, msg
+        msg = "#{self.class} can't change state from '#{@state}' to '#{new_state_name}', only to: #{valid}"
+        raise ArgumentError, msg
       end
 
-      new_state = states[state_name]
-
-      unless new_state
-        return if state_name == default_state
-        fail ArgumentError, "invalid state for #{self.class}: #{state_name}"
+      unless (new_state = self.class.states[new_state_name])
+        new_state_name == self.class.start_state or raise ArgumentError, "invalid state for #{self.class}: #{new_state_name}"
       end
 
       new_state
     end
 
-    def transition_with_callbacks!(state_name)
-      transition! state_name.name
-      state_name.call(self)
-    end
-
-    def states
-      self.class.states
-    end
-
-    def default_state
-      self.class.default_state
+    def transition_with_callbacks!(new_state)
+      transition! new_state.name
+      new_state.call(self)
     end
 
     def current_state
-      states[@state]
-    end
-
-    def current_state_name
-      current_state && current_state.name || ''
+      self.class.states[@state]
     end
 
     class State
       attr_reader :name, :transitions
 
-      def initialize(name, transitions = nil, &block)
+      def initialize(name, transitions, &block)
         @name = name
         @block = block
-        @transitions = nil
-        @transitions = Array(transitions).map(&:to_sym) if transitions
+        @transitions = if transitions
+                         Array(transitions).map(&:to_sym)
+                       end
       end
 
       def call(obj)
@@ -122,10 +121,8 @@ module Listen
       end
 
       def valid_transition?(new_state)
-        # All transitions are allowed unless expressly
-        return true unless @transitions
-
-        @transitions.include? new_state.to_sym
+        # All transitions are allowed if none are expressly declared
+        !@transitions || @transitions.include?(new_state.to_sym)
       end
     end
   end

@@ -17,13 +17,14 @@ module Listen
 
         loop do
           Listen::Logger.debug("InvocaDebug: about to _wait_until_events")
-          _wait_until_events
+          event = _wait_until_events
+          _check_stopped
           Listen::Logger.debug("InvocaDebug: about to _wait_until_events_calm_down")
           _wait_until_events_calm_down
           Listen::Logger.debug("InvocaDebug: about to _wait_until_no_longer_paused")
           _wait_until_no_longer_paused
           Listen::Logger.debug("InvocaDebug: about to _process_changes")
-          _process_changes
+          _process_changes(event)
         end
       catch :stopped
         Listen::Logger.debug('Processing stopped')
@@ -42,37 +43,31 @@ module Listen
 
           # give events a bit of time to accumulate so they can be
           # compressed/optimized
-          _sleep(:waiting_until_latency, diff)
+          _sleep(diff)
         end
       end
 
       def _wait_until_no_longer_paused
-        # TODO: may not be a good idea?
-        while @listener.paused?
-          _sleep(:waiting_for_unpause)
-        end
+        @listener.wait_for_state(*(Listener.states.keys - [:paused]))
       end
 
       def _check_stopped
         if @listener.stopped?
           _flush_wakeup_reasons
-          throw :stopped
+          throw Stopped
         end
       end
 
-      def _sleep(_local_reason, *args)
+      def _sleep(seconds)
         _check_stopped
-        sleep_duration = @config.sleep(*args)
+        @config.sleep(seconds)
         _check_stopped
 
         _flush_wakeup_reasons do |reason|
-          next if reason != :event # wakeup_reason
-          unless @listener.paused?
+          if reason == :event && !@listener.paused?
             _remember_time_of_first_unprocessed_event
           end
         end
-
-        sleep_duration
       end
 
       def _remember_time_of_first_unprocessed_event
@@ -87,10 +82,12 @@ module Listen
         @first_unprocessed_event_time + @latency
       end
 
+      # blocks until event is popped
+      # returns the event or `nil` when the event_queue is closed
       def _wait_until_events
-        # TODO: long sleep may not be a good idea?
-        _sleep(:waiting_for_events) while @config.event_queue.empty?
-        @first_unprocessed_event_time ||= _timestamp
+        @config.event_queue.pop.tap do |_event|
+          @first_unprocessed_event_time ||= _timestamp
+        end
       end
 
       def _flush_wakeup_reasons
@@ -105,13 +102,11 @@ module Listen
       end
 
       # for easier testing without sleep loop
-      def _process_changes
+      def _process_changes(event)
         _reset_no_unprocessed_events
 
-        changes = []
+        changes = [event]
         changes << @config.event_queue.pop until @config.event_queue.empty?
-
-        Listen::Logger.debug("InvocaDebug: _process_changes popped #{changes.size}")
 
         if @config.callable?
           hash = @config.optimize_changes(changes)

@@ -9,10 +9,19 @@ module Listen
     class Queue
       extend Forwardable
 
-      def initialize(relative, &block)
-        @relative = relative
-        @block = block
+      class Config
+        def initialize(relative)
+          @relative = relative
+        end
+
+        def relative?
+          @relative
+        end
+      end
+
+      def initialize(config)
         @event_queue = ::Queue.new
+        @config = config
       end
 
       def <<(args)
@@ -25,13 +34,12 @@ module Listen
 
         Listen::Logger.debug("InvocaDebug: queuing #{[type, change, safe_dir, path, options]} to queue with depth #{@event_queue.size}")
 
-        @event_queue << [type, change, safe_dir, path, options]
-
-        @block&.call(args)
+        @event_queue.public_send(:<<, [type, change, safe_dir, path, options])
       end
 
       delegate empty?: :@event_queue
       delegate pop: :@event_queue
+      delegate close: :@event_queue
 
       private
 
